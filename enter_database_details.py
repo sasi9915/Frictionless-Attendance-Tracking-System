@@ -1,103 +1,144 @@
 import sqlite3
-import os
-import time
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-from PIL import Image
-from PIL.ExifTags import TAGS
+import requests
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import io
 
 # SQLite database setup
-db_name = "user_database.db"
+db_name = "elec_database.db"
 connection = sqlite3.connect(db_name)
 cursor = connection.cursor()
 
 # Create the table if it doesn't exist
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS students (
-    index_number INTEGER PRIMARY KEY,
+    index_number TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     role TEXT NOT NULL,
-    image TEXT NOT NULL
+    image BLOB NOT NULL
 )
 ''')
 connection.commit()
-
 print("Database setup complete.\n")
 
-# Function to extract metadata (if needed)
-def extract_metadata(image_path):
-    """
-    Extract metadata from an image file. For simplicity, this function 
-    uses placeholder data for 'index_number', 'name', and 'role'.
-    Replace this with actual metadata extraction logic as required.
-    """
+# Google Sheets API setup
+def authenticate_google_sheet(credentials_file, sheet_name):
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
+    client = gspread.authorize(credentials)
+    sheet = client.open(sheet_name).sheet1  # Access the first sheet
+    return sheet
+
+# Get a direct-downloadable URL from a Google Drive sharing link
+def get_downloadable_url(drive_url):
+    if "id=" in drive_url:
+        file_id = drive_url.split("id=")[-1]
+        return f"https://drive.google.com/uc?id={file_id}&export=download"
+    else:
+        print(f"Invalid Google Drive URL: {drive_url}")
+        return None
+
+# Download the image as binary data
+def download_image_as_blob(image_url):
     try:
-        # Placeholder logic: Extract file name and create fake data
-        file_name = os.path.basename(image_path)
-        index_number = int(file_name.split('_')[0])  # Example: "123_name_role.jpg"
-        name = file_name.split('_')[1].capitalize()
-        role = file_name.split('_')[2].split('.')[0].capitalize()
-
-        # Optional: Extract additional metadata using PIL (if needed)
-        image = Image.open(image_path)
-        metadata = {}
-        for tag, value in image._getexif().items():
-            tag_name = TAGS.get(tag, tag)
-            metadata[tag_name] = value
-        
-        return index_number, name, role, image_path
+        response = requests.get(image_url, stream=True)
+        if response.status_code == 200:
+            return response.content  # Return the binary data directly
+        else:
+            print(f"Failed to download image from {image_url}. Status code: {response.status_code}")
+            return None
     except Exception as e:
-        print(f"Error extracting metadata from {image_path}: {e}")
-        return None, None, None, None
+        print(f"Error downloading image: {e}")
+        return None
 
-# Function to insert data into the database
-def insert_into_database(index_number, name, role, image):
+# Insert the binary image data into the SQLite database
+def insert_into_database(index_number, name, role, image_blob):
     try:
         cursor.execute('''
         INSERT INTO students (index_number, name, role, image)
         VALUES (?, ?, ?, ?)
-        ''', (index_number, name, role, image))
+        ''', (index_number, name, role, sqlite3.Binary(image_blob)))
         connection.commit()
-        print(f"Inserted data: Index: {index_number}, Name: {name}, Role: {role}, Image: {image}\n")
+        print(f"Inserted data: Index: {index_number}, Name: {name}, Role: {role}\n")
     except sqlite3.IntegrityError:
         print(f"Error: Duplicate index number {index_number}. Skipping entry.\n")
     except Exception as e:
         print(f"Unexpected error while inserting into database: {e}\n")
 
-# File System Event Handler
-class ImageHandler(FileSystemEventHandler):
-    def on_created(self, event):
-        if event.is_directory:
-            return  # Skip directories
-        if event.src_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-            print(f"New image detected: {event.src_path}")
-            # Extract metadata and insert into database
-            index_number, name, role, image_path = extract_metadata(event.src_path)
-            if index_number and name and role:
-                insert_into_database(index_number, name, role, image_path)
-            else:
-                print(f"Skipping {event.src_path} due to incomplete metadata.\n")
+# Process Google Sheet data and upload images as BLOBs
+'''def process_google_sheet(sheet):
+    records = sheet.get_all_records()
+    for record in records:
+        try:
+            name = record['Your Name :']
+            index_number = record['E number :']
+            role = "Student"
+            drive_url = record['Upload a Clear photo of you : (rename the photo indexno_name)ex.217_Irushi.jpg']
 
-# Monitor a folder for new images
-def monitor_folder(folder_path):
-    print(f"Monitoring folder: {folder_path}")
-    event_handler = ImageHandler()
-    observer = Observer()
-    observer.schedule(event_handler, path=folder_path, recursive=False)
-    observer.start()
-    try:
-        while True:
-            time.sleep(1)  # Keep the script running
-    except KeyboardInterrupt:
-        print("\nStopping folder monitor...")
-        observer.stop()
-    observer.join()
+            image_url = get_downloadable_url(drive_url)
+            if not image_url:
+                print(f"Skipping {name} (Index: {index_number}) due to invalid image URL.\n")
+                continue
+
+            # Download image as binary data
+            image_blob = download_image_as_blob(image_url)
+
+            if image_blob:
+                insert_into_database(index_number, name, role, image_blob)
+            else:
+                print(f"Failed to process image for {name} (Index: {index_number}).\n")
+
+        except KeyError as e:
+            print(f"Missing expected field in Google Sheet data: {e}")
+        except Exception as e:
+            print(f"Error processing record: {e}")''' 
+
+def process_google_sheet(sheet):
+    records = sheet.get_all_records()
+    for record in records:
+        try:
+            name = record['Your Name :']
+            index_number = record['E number :']
+            role = "Student"
+
+            # Debug: Print available columns
+            print(f"Available columns: {list(record.keys())}")
+
+            # Ensure the correct column name
+            drive_url = record['Upload a Clear photo of you : (rename the photo indexno_name)\nex.217_Irushi.jpg']
+
+            image_url = get_downloadable_url(drive_url)
+            if not image_url:
+                print(f"Skipping {name} (Index: {index_number}) due to invalid image URL.\n")
+                continue
+
+            # Download image as binary data
+            image_blob = download_image_as_blob(image_url)
+
+            if image_blob:
+                insert_into_database(index_number, name, role, image_blob)
+            else:
+                print(f"Failed to process image for {name} (Index: {index_number}).\n")
+
+        except KeyError as e:
+            print(f"Missing expected field in Google Sheet data: {e}")
+        except Exception as e:
+            print(f"Error processing record: {e}")
+
 
 # Main function
 if __name__ == "__main__":
-    folder_to_monitor = "image_uploads"  # Replace with your folder path
-    os.makedirs(folder_to_monitor, exist_ok=True)  # Create folder if it doesn't exist
-    monitor_folder(folder_to_monitor)
+    credentials_file = "/home/ukil_217/graphite-cell-449009-r5-7bdb9b4f8d78.json"
+    sheet_name = "Collecting data form (Responses)"
+
+    try:
+        sheet = authenticate_google_sheet(credentials_file, sheet_name)
+        process_google_sheet(sheet)
+    except Exception as e:
+        print(f"Error setting up Google Sheets API: {e}")
 
     # Close the database connection when the program ends
     connection.close()
