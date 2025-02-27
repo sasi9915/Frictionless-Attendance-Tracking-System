@@ -1,0 +1,16 @@
+##store_image.py
+Create Database – Sets up an SQLite database to store names, E numbers, and images.
+Fetch Data from Google Sheets – Retrieves names, E numbers, and image links from a specified Google Sheet.
+Download Images – Extracts file IDs from Google Drive links and downloads the corresponding images.
+Store Images in Database – Saves the names, E numbers, and images in the database.
+Retrieve & Display Images – Fetches an image from the database and displays it using Matplotlib.
+Main Execution – Runs all steps, storing and displaying each image.
+
+##store_image_final.py
+Create Database – Sets up an SQLite database to store names, E numbers, and face embeddings.
+Fetch Data from Google Sheets – Retrieves names, E numbers, and image links from a Google Sheet.
+Download Images – Extracts file IDs from Google Drive links and downloads the images.
+Extract Face Embeddings – Uses InsightFace to detect faces and generate a numerical face embedding.
+Store Embeddings in Database – Saves the name, E number, and face embedding in the SQLite database.
+Main Execution – Runs all steps for each record, storing detected face embeddings.
+
