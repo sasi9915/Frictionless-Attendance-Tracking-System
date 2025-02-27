@@ -1,0 +1,210 @@
+import sqlite3 
+import tkinter as tk
+from tkinter import filedialog, Toplevel
+from tkinter import Label, ttk
+from PIL import Image, ImageTk
+import torch
+from insightface.app import FaceAnalysis
+import numpy as np
+import cv2
+from io import BytesIO
+from datetime import datetime
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Initialize face analyzer
+face_analyzer = FaceAnalysis(name="buffalo_l")
+face_analyzer.prepare(ctx_id=0 if torch.cuda.is_available() else -1)
+
+DB_PATH = "images_all.db"
+
+# Initialize database
+def initialize_database():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""CREATE TABLE IF NOT EXISTS Images (
+                        name TEXT PRIMARY KEY,
+                        image BLOB,
+                        embedding BLOB
+                    )""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS Attendance (
+                        name TEXT PRIMARY KEY,
+                        in_time TEXT,
+                        out_time TEXT
+                    )""")
+    conn.commit()
+    conn.close()
+
+initialize_database()
+
+# Extract face embedding
+def extract_features(image_path):
+    try:
+        img = Image.open(image_path).convert("RGB")
+        img_array = np.array(img)
+        img_array = cv2.resize(img_array, (640, 640))
+        faces = face_analyzer.get(img_array)
+
+        if not faces:
+            print("❌ No face detected.")
+            return None, img
+
+        embedding = faces[0].normed_embedding
+        if embedding is None:
+            print("⚠️ Failed to extract embedding.")
+            return None, img
+
+        return embedding.astype(np.float32).tobytes(), img
+
+    except Exception as e:
+        print(f"⚠️ Error extracting features: {e}")
+        return None, None
+
+# Load database
+def load_database():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, embedding FROM Images")
+    records = cursor.fetchall()
+    conn.close()
+
+    database = []
+    for name, embedding_data in records:
+        if embedding_data:
+            features = np.frombuffer(embedding_data, dtype=np.float32)
+            database.append((name, features))
+    return database
+
+# Compute similarity
+def compute_similarity(features1, features2):
+    return cosine_similarity([features1], [features2])[0][0]
+
+# Update attendance
+def update_attendance(name):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Check the latest in-time and out-time for this person
+    cursor.execute("SELECT in_time, out_time FROM Attendance WHERE name=?", (name,))
+    record = cursor.fetchone()
+
+    if record is None:
+        # If the person is not in the database, insert them with an in-time
+        cursor.execute("INSERT INTO Attendance (name, in_time, out_time) VALUES (?, ?, ?)", (name, current_time, None))
+    else:
+        in_time, out_time = record
+
+        if out_time is None:
+            # If the last entry has in-time but no out-time, update out-time
+            cursor.execute("UPDATE Attendance SET out_time=? WHERE name=?", (current_time, name))
+        else:
+            # If both in-time & out-time exist, update in-time and reset out-time
+            cursor.execute("UPDATE Attendance SET in_time=?, out_time=NULL WHERE name=?", (current_time, name))
+
+    conn.commit()
+    conn.close()
+
+# GUI Class
+class FaceRecognitionApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Face Recognition System")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#2c3e50")
+
+        # Header
+        header = Label(root, text="Face Recognition System", font=("Arial", 20, "bold"), bg="#063970", fg="white", pady=10)
+        header.pack(fill="x")
+
+        # Image Display Area
+        self.img_canvas = tk.Label(root, bg="#ecf0f1", relief="solid", bd=2)
+        self.img_canvas.pack(pady=10)
+
+        # Upload Button
+        self.btn_upload = tk.Button(root, text="Upload Image", command=self.upload_image, font=("Arial", 14), 
+                                    bg="#3498db", fg="white", padx=10, pady=5, relief="raised", cursor="hand2")
+        self.btn_upload.pack(pady=10)
+
+        # Result Label
+        self.result_label = tk.Label(root, text="", font=("Arial", 16, "bold"), fg="blue", bg="#2c3e50")
+        self.result_label.pack(pady=10)
+
+        # Attendance Button
+        self.btn_attendance = tk.Button(root, text="View Attendance", command=self.view_attendance, font=("Arial", 14),
+                                        bg="#e74c3c", fg="white", padx=10, pady=5, relief="raised", cursor="hand2")
+        self.btn_attendance.pack(pady=5)
+
+        self.database = load_database()
+
+    def upload_image(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png")])
+        if file_path:
+            self.display_image(file_path)
+            self.recognize_face(file_path)
+
+    def display_image(self, image_path):
+        img = Image.open(image_path).resize((200, 200))
+        img = ImageTk.PhotoImage(img)
+        self.img_canvas.img = img
+        self.img_canvas.config(image=img)
+
+    def recognize_face(self, image_path):
+        embedding, img = extract_features(image_path)
+        if embedding is None:
+            self.result_label.config(text="No face detected!", fg="red")
+            return
+
+        current_features = np.frombuffer(embedding, dtype=np.float32)
+        best_match = None
+        best_score = 0.0
+
+        for name, stored_features in self.database:
+            similarity = compute_similarity(current_features, stored_features)
+            if similarity > best_score and similarity > 0.6:
+                best_score = similarity
+                best_match = name
+
+        if best_match:
+            self.result_label.config(text=f"Recognized as: {best_match} (Score: {best_score:.2f})", fg="green")
+            update_attendance(best_match)
+        else:
+            self.result_label.config(text="Unrecognized Face", fg="red")
+            self.show_unrecognized_face(img)
+
+    def show_unrecognized_face(self, img):
+        unrecognized_window = Toplevel(self.root)
+        unrecognized_window.title("Unrecognized Face")
+        unrecognized_window.geometry("350x400")
+        unrecognized_window.configure(bg="white")
+
+        Label(unrecognized_window, text="Unrecognized Face", font=("Helvetica", 16, "bold"), fg="red", bg="white").pack(pady=10)
+        img = img.resize((200, 200))
+        img = ImageTk.PhotoImage(img)
+        label = Label(unrecognized_window, image=img, bg="white")
+        label.image = img
+        label.pack()
+
+    def view_attendance(self):
+        attendance_window = Toplevel(self.root)
+        attendance_window.title("Attendance Records")
+        attendance_window.geometry("600x400")
+        attendance_window.configure(bg="white")
+
+        Label(attendance_window, text="Attendance Records", font=("Helvetica", 16, "bold"), fg="black", bg="white").pack(pady=10)
+        tree = ttk.Treeview(attendance_window, columns=("Name", "In Time", "Out Time"), show="headings")
+        tree.heading("Name", text="Name")
+        tree.heading("In Time", text="In Time")
+        tree.heading("Out Time", text="Out Time")
+        tree.pack(expand=True, fill="both")
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM Attendance")
+        for row in cursor.fetchall():
+            tree.insert("", "end", values=row)
+        conn.close()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FaceRecognitionApp(root)
+    root.mainloop()
