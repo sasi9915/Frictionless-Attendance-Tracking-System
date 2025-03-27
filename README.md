@@ -113,3 +113,11 @@ print(f"Average FPS: {frame_count / total_time:.1f}")
 print(f"Total Faces Detected: {face_counter}")
 print(f"Processed video saved at: {output_video_path}")
 print(f"Detected face images saved in: {detected_faces_dir}")  Here what  i am trying to do is run my face detection mdule on jetson xavier gpu because i ahve knwon that using pu will be ore efficient and accurate and less latency with comparing with the cpu working.So herer is the code  i have you have to provide necessary steps to run the module what are the how to check if the mmodule is going on te gpu before start the model run.what are the packaes and also so clearly mentioned that the where are the necessary videos and other folders sho;ud be placed and alsonote that i am using a  vertual environmmnet named as jetson_env,activated.
+
+
+
+
+
+##############################
+
+https://wiki.seeedstudio.com/YOLOv8-TRT-Jetson/
