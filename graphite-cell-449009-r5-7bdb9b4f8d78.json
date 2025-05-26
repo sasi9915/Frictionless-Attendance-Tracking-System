@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "graphite-cell-449009-r5",
+  "private_key_id": "7bdb9b4f8d78a07964e47e3660e850765f70e9aa",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDQS0z9njekqL2j\noWH3r3EgyAWy/Np8Gy1nslBrq7uITnMmD4WjXmNwMubFcSvApd1RwGGuVDeQ9pkY\n1cxYONM2ND18NjDzXJd5uw7oKa9Eqhp42lx0db47y01d+nYiOypGtAnTzrsbgJEp\nFujMSpw7rh2jQ0kGMxUVtI5TOWW9Lp+sC/10LBTUI93wSRm+vzTCFvlh0uSD9ksP\nQ2dtCKPfbpl/4D9Y2FkyKPOZ8HnpTGlIydabtDvXSIthNHSm8dtvAyBoa0nCQnP6\nd7pHu8GszY4icGeVMqN6INxAR+8yYHTSgTKkVTjucW2TZSvE+YFLtuejWP/Biv5C\ns7cxMSELAgMBAAECggEAEgYiEGQrfnUXi9xAJPWqfWKxk45rvYeAg1Obv+VpYd8f\n+bAoKT3WrvPIolcrqQzxPMy/5xzkfgfIsax2dT/djvgwRdpOnBBsDx2PqalJwFBT\n4BdNHsq9fmEWPcaZiFbETr/vhcOCz1tttDeGR39BS6zCZclBvWaYMXuhQTRbSGZj\nWvDNiNC/SdmM3ZrgSOG91wZDd+3FvxxCr/DoNMnJHyCEBr6hlDuwFifjjuKyY4T7\nhwGWSW5k8hi5PHJ2TnY09z8duDncxhwH4MWqrkXW4ju8zupiMgrabwnNvB0S1w7U\nHIYV+/T4+uujLguHw1Fj+IEzAlzEeWdAdxPUnMv9gQKBgQD4UfyU/JjwgjiRSB7+\nq2KQ+0oq/Z/FNF8EV/wxILysjuYB0+Xza+D6LFMKEsf2DFIWK/Vs+OzJUZynEzFi\nH37PmY9hE/3s2YNjmzZZzMu/g3xrYTGJ8ig6yWwWLsVtjn5oMSOkmulRaHKicet5\nprl3gVI90ANO3EEQ2t9l8mWoSwKBgQDWvGrYHtAfu9RVxMBAvCV9JUcHQvbfWZyz\n0J8BrSBofUkdr71uPVogmTmkyXXUs+HD7EB4ICcWDJ2cqCEDOrrklcDOZEp33DSo\nx7wB0f4tCv+nFOKLo85Ns0S92zZxvogecgw7MwtZPaZmqLvWX76DUUUKcvd8tC/L\nzhuQu1ByQQKBgQCB3z9fHI1QnIrBURsEztYKRaMQwP0iwrU/LFU1zI1hIouhQRXv\nLejIbw4vIot6YA8+kVcW20ncMNbheuRFEXvdT87xUudnTIuvOKpAZR/a1gXokzi5\nkPEBbf8dyvBu0CvEio69tFd6wEnUNAiX41705aoBsh1IzWEqU46rXw9T6QKBgCeW\nYNQrCg9vnzuYpCDLDtY9cxTBoaWXba4wvb+fXSQmRL52UaPrJ5xu4xOgGFr4Npza\nByCePNZxyPTCgiOIRkAx43OpRZlHPWYIPH7Radx/9JWm4gUAU947OGcP7L+Xcpy6\nRcr8JBF1riGq5cYlrIelCeddPob86PrXqnlKLxCBAoGAckvyinph12bkB2BcxgDm\n/01IwULCeZwYAiFbIc7jrIS4mVXUY1xenYtQQ6azqT+2LR4hBfx/sZivjCfNGBNV\nU4SRaNAztdHlvTdgeJZ5zUMtfZCqBLuO6xB4wlvl+o2eXR+uKEIpB8nJBn/NYctM\n9WbuTYHRc1oinwUOYYkaxv4=\n-----END PRIVATE KEY-----\n",
+  "client_email": "sheets-api-service-account@graphite-cell-449009-r5.iam.gserviceaccount.com",
+  "client_id": "105407387778461930293",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/sheets-api-service-account%40graphite-cell-449009-r5.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
