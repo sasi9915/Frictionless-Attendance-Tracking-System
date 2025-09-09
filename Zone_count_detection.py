@@ -5,6 +5,7 @@ import os
 import time
 import logging
 import threading
+import queue
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -123,7 +124,7 @@ except Exception as e:
     logger.error(f"Failed to load TensorRT model: {e}")
     exit(1)
 
-def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, stream_name):
+def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, stream_name, display_queue):
     global entrance_count, exit_count, zone_count
     cap = cv2.VideoCapture(gstreamer_pipeline, cv2.CAP_GSTREAMER)
     if not cap.isOpened():
@@ -199,8 +200,6 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                 cv2.putText(display_frame, f'{stream_name} {track_id} ({score:.2f})', (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                 current_count += 1
-
-                # --- UPDATE COUNTERS ---
                 if track_id not in saved_faces or (current_time - saved_faces[track_id]) >= time_window:
                     min_size = 64
                     if face_crop.size > 0 and face_crop.shape[0] >= min_size and face_crop.shape[1] >= min_size:
@@ -216,8 +215,7 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                                         zone_count += 1
                                     elif stream_name == 'exit':
                                         exit_count += 1
-                                        zone_count = max(0, zone_count - 1)  # Prevent negative count
-
+                                        zone_count = max(0, zone_count - 1)
         else:
             for box in last_boxes:
                 x1, y1, x2, y2 = map(int, box)
@@ -225,8 +223,6 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                 cv2.putText(display_frame, stream_name, (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             current_count = len(last_boxes)
-
-        # --- DISPLAY COUNTS ---
         with counter_lock:
             cv2.putText(display_frame, f"{stream_name} Real-time: {current_count}", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
@@ -236,16 +232,13 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (128, 0, 0), 2)
             cv2.putText(display_frame, f"Zone Count: {zone_count}", (20, 160),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 128), 2)
-
         out.write(display_frame)
-        cv2.imshow(f'Live Face Detection - {stream_name}', display_frame)
+        display_queue.put((f'Live Face Detection - {stream_name}', display_frame, current_count))
         if frame_count % 10 == 0:
             logger.info(f"{face_counter} faces ({stream_name})")
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        # Remove cv2.waitKey from thread
     cap.release()
     out.release()
-    cv2.destroyAllWindows()
     total_time = time.time() - start_time
     logger.info(f"\n{stream_name} complete!")
     logger.info(f"Total frames processed: {frame_count}")
@@ -272,16 +265,28 @@ if __name__ == "__main__":
     }
     for conf in rtsp_configs.values():
         os.makedirs(conf['output_dir'], exist_ok=True)
+    display_queue = queue.Queue()
     threads = []
     for name, conf in rtsp_configs.items():
-        t = threading.Thread(target=process_stream, args=(conf['url'], conf['gstreamer'], conf['output_dir'], conf['video_out'], name))
+        t = threading.Thread(target=process_stream, args=(conf['url'], conf['gstreamer'], conf['output_dir'], conf['video_out'], name, display_queue))
         t.daemon = True
         t.start()
         threads.append(t)
+    camera_counts = {'entrance': 0, 'exit': 0}
+    while True:
+        try:
+            win_name, frame, current_count = display_queue.get(timeout=1)
+            cv2.imshow(win_name, frame)
+            cam_name = win_name.split('Live Face Detection - ')[-1]
+            print(f"{cam_name} real-time count: {current_count}")
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        except queue.Empty:
+            if not any(t.is_alive() for t in threads):
+                break
     for t in threads:
         t.join()
-
-    # Final results log
+    cv2.destroyAllWindows()
     logger.info(f"Final Entrance Count: {entrance_count}")
     logger.info(f"Final Exit Count: {exit_count}")
     logger.info(f"Final Zone Count: {zone_count}")
