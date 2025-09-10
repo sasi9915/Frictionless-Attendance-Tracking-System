@@ -7,15 +7,16 @@ import logging
 import threading
 import queue
 
-# Logging setup
+# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Thread-safe counters
 from threading import Lock
 
 entrance_count = 0
 exit_count = 0
-zone_counts = {}  # e.g. {'zone1': 0, 'zone2': 0}
+zone_count = 0
 counter_lock = Lock()
 
 class CentroidTracker:
@@ -107,6 +108,7 @@ def is_sharp(image, threshold=100):
         gray = image
     return cv2.Laplacian(gray, cv2.CV_64F).var() > threshold
 
+# Initialize YOLOv8 face detector with TensorRT engine
 try:
     trt_model = YOLO("yolov8n-face.engine")
 except Exception as e:
@@ -114,8 +116,7 @@ except Exception as e:
     exit(1)
 
 def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, stream_name, display_queue):
-    global entrance_count, exit_count, zone_counts
-
+    global entrance_count, exit_count, zone_count
     cap = cv2.VideoCapture(gstreamer_pipeline, cv2.CAP_GSTREAMER)
     if not cap.isOpened():
         logger.warning(f"{stream_name}: GStreamer pipeline failed. Falling back to FFmpeg backend...")
@@ -123,7 +124,6 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
         if not cap.isOpened():
             logger.error(f"{stream_name}: Failed to open RTSP stream with both GStreamer and FFmpeg backends")
             return
-
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
@@ -131,19 +131,16 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
     out = cv2.VideoWriter(video_out_path, fourcc, fps, (frame_width, frame_height))
     tracker = CentroidTracker(max_disappeared=30)
     saved_faces = {}
-    counted_ids = set()  # Track IDs already counted for this stream
+    counted_ids = set()  # <--- Track IDs already counted for this stream
     time_window = 5
     last_boxes = []
     frame_count = 0
     face_counter = 0
     start_time = time.time()
-    if stream_name not in zone_counts and stream_name.startswith("zone"):
-        zone_counts[stream_name] = 0  # initialize zone count
-
-    prev_total_count = 0  # For sudden jump detection
-    sudden_jump_threshold = 10
-
     logger.info(f"Processing RTSP stream: {rtsp_url} ({stream_name})...")
+
+    # Track new face IDs per frame to prevent sudden count jumps
+    prev_counted_ids = set()
 
     while True:
         success, frame = cap.read()
@@ -156,7 +153,8 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
             continue
         frame_count += 1
         display_frame = frame.copy()
-        current_count = 0
+        current_count = 0  # Real-time count for this frame
+        new_ids_this_frame = set()
 
         if frame_count % 5 == 0:
             results = trt_model(frame, verbose=False, conf=0.5, device='0', imgsz=640)
@@ -200,6 +198,7 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                 cv2.putText(display_frame, f'{stream_name} {track_id} ({score:.2f})', (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                 current_count += 1
+                # --------- ONLY COUNT IF TRACK_ID HAS NOT BEEN COUNTED YET --------
                 if track_id not in counted_ids:
                     if track_id not in saved_faces or (current_time - saved_faces[track_id]) >= time_window:
                         min_size = 64
@@ -210,7 +209,21 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                                 if success:
                                     saved_faces[track_id] = current_time
                                     face_counter += 1
-                                    counted_ids.add(track_id)
+                                    new_ids_this_frame.add(track_id)
+            # Detect sudden count jumps and ignore them
+            num_new_ids = len(new_ids_this_frame)
+            if num_new_ids > 10:
+                logger.warning(f"Sudden count jump detected: {num_new_ids} new faces in frame {frame_count}. Ignoring increment for this frame.")
+            else:
+                counted_ids.update(new_ids_this_frame)
+                with counter_lock:
+                    for track_id in new_ids_this_frame:
+                        if stream_name == 'entrance':
+                            entrance_count += 1
+                            zone_count += 1
+                        elif stream_name == 'exit':
+                            exit_count += 1
+                            zone_count = max(0, zone_count - 1)
         else:
             for box in last_boxes:
                 x1, y1, x2, y2 = map(int, box)
@@ -218,26 +231,6 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                 cv2.putText(display_frame, stream_name, (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             current_count = len(last_boxes)
-
-        # Sudden jump protection: Ignore frames where count increases >10
-        if abs(current_count - prev_total_count) > sudden_jump_threshold:
-            logger.warning(f"Sudden jump detected in {stream_name}: from {prev_total_count} to {current_count}. Ignoring count update for this frame.")
-            out.write(display_frame)
-            display_queue.put((f'Live Face Detection - {stream_name}', display_frame, prev_total_count))
-            continue
-        else:
-            prev_total_count = current_count
-
-        # Count logic (only for safe frames)
-        with counter_lock:
-            if stream_name == 'entrance':
-                entrance_count = current_count
-            elif stream_name == 'exit':
-                exit_count = current_count
-            elif stream_name.startswith("zone"):
-                zone_counts[stream_name] = current_count
-
-        # Display overlays
         with counter_lock:
             cv2.putText(display_frame, f"{stream_name} Real-time: {current_count}", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
@@ -245,11 +238,8 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, str
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 128, 0), 2)
             cv2.putText(display_frame, f"Exit Total: {exit_count}", (20, 120),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (128, 0, 0), 2)
-            y_offset = 160
-            for z_name, z_count in zone_counts.items():
-                cv2.putText(display_frame, f"{z_name} Count: {z_count}", (20, y_offset),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 128), 2)
-                y_offset += 40
+            cv2.putText(display_frame, f"Zone Count: {zone_count}", (20, 160),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 128), 2)
         out.write(display_frame)
         display_queue.put((f'Live Face Detection - {stream_name}', display_frame, current_count))
         if frame_count % 10 == 0:
@@ -278,18 +268,6 @@ if __name__ == "__main__":
             'gstreamer': 'rtspsrc location=rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink',
             'output_dir': 'detected_faces/exit',
             'video_out': 'output_exit.mp4',
-        },
-        'zone1': {
-            'url': 'rtsp://your_zone1_camera_url',
-            'gstreamer': 'rtspsrc location=rtsp://your_zone1_camera_url latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink',
-            'output_dir': 'detected_faces/zone1',
-            'video_out': 'output_zone1.mp4',
-        },
-        'zone2': {
-            'url': 'rtsp://your_zone2_camera_url',
-            'gstreamer': 'rtspsrc location=rtsp://your_zone2_camera_url latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink',
-            'output_dir': 'detected_faces/zone2',
-            'video_out': 'output_zone2.mp4',
         }
     }
     for conf in rtsp_configs.values():
@@ -297,17 +275,11 @@ if __name__ == "__main__":
     display_queue = queue.Queue()
     threads = []
     for name, conf in rtsp_configs.items():
-        t = threading.Thread(target=process_stream, args=(
-            conf['url'],
-            conf['gstreamer'],
-            conf['output_dir'],
-            conf['video_out'],
-            name,
-            display_queue
-        ))
+        t = threading.Thread(target=process_stream, args=(conf['url'], conf['gstreamer'], conf['output_dir'], conf['video_out'], name, display_queue))
         t.daemon = True
         t.start()
         threads.append(t)
+    camera_counts = {'entrance': 0, 'exit': 0}
     while True:
         try:
             win_name, frame, current_count = display_queue.get(timeout=1)
@@ -324,5 +296,4 @@ if __name__ == "__main__":
     cv2.destroyAllWindows()
     logger.info(f"Final Entrance Count: {entrance_count}")
     logger.info(f"Final Exit Count: {exit_count}")
-    for z_name, z_count in zone_counts.items():
-        logger.info(f"Final {z_name} Count: {z_count}")
+    logger.info(f"Final Zone Count: {zone_count}")
