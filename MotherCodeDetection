@@ -1,0 +1,110 @@
+import subprocess
+import threading
+import time
+import tkinter as tk
+import os
+
+# Zone configurations (add more as needed)
+ZONE_CONFIGS = [
+    {
+        "name": "entrance",
+        "rtsp_url": "rtsp://admin:FYP12345@10.40.16.236:554/Streaming/Channels/101",
+        "gstreamer": "rtspsrc location=rtsp://admin:FYP12345@10.40.16.236:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+        "output_dir": "detected_faces/Elementary Lab/entrance",
+        "video_out": "output_entrance.mp4",
+        "zone_name" : "Elementary Lab"
+        "count_file": "entrance_counts.txt"
+    },
+    {
+        "name": "exit",
+        "rtsp_url": "rtsp://admin:@Deee123@10.40.16.217:554/Streaming/Channels/101",
+        "gstreamer": "rtspsrc location=rtsp://admin:@Deee123@10.40.16.217:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+        "output_dir": "detected_faces/Elementary Lab/exit",
+        "video_out": "output_exit.mp4",
+        "zone_name" : "Elementary Lab"
+        "count_file": "exit_counts.txt"
+    },
+{
+        "name": "entrance",
+        "rtsp_url": "rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101",
+        "gstreamer": "rtspsrc location=rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+        "output_dir": "detected_faces/High Voltage Lab/entrance",
+        "video_out": "output_entrance.mp4",
+        "zone_name" : "High Voltage Lab"
+        "count_file": "entrance_counts.txt"
+    },
+    {
+        "name": "exit",
+        "rtsp_url": "rtsp://admin:@DeeeEngex@10.40.16.214:554/Streaming/Channels/101",
+        "gstreamer": "rtspsrc location=rtsp://admin:@DeeeEngex@10.40.16.214:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+        "output_dir": "detected_faces/High Voltage Lab/exit",
+        "video_out": "output_exit.mp4",
+        "zone_name" : "High Voltage Lab"
+        "count_file": "exit_counts.txt"
+    },
+    # Add more zones 
+]
+
+# Function to launch zone detectors
+def launch_zone_detector(zone_config):
+    args = [
+        "python", "Zone_count_detection.py",
+        "--rtsp_url", zone_config["rtsp_url"],
+        "--gstreamer", zone_config["gstreamer"],
+        "--output_dir", zone_config["output_dir"],
+        "--video_out", zone_config["video_out"],
+        "--zone_name", zone_config["name"],
+        "--count_file", zone_config["count_file"]
+    ]
+    # Zone_count_detection.py should accept these arguments and write counts to count_file
+    return subprocess.Popen(args)
+
+# Function to read counts from count file
+def read_counts(count_file):
+    if not os.path.exists(count_file):
+        return (0, 0, 0)
+    try:
+        with open(count_file, "r") as f:
+            lines = f.read().splitlines()
+            # expect: entrance_count exit_count zone_count
+            if len(lines) >= 3:
+                return (int(lines[0]), int(lines[1]), int(lines[2]))
+    except Exception as e:
+        print(f"Error reading {count_file}: {e}")
+    return (0, 0, 0)
+
+# Tkinter UI
+class ZoneCountApp(tk.Tk):
+    def __init__(self, zone_configs):
+        super().__init__()
+        self.title("Zone Count Monitor")
+        self.zone_configs = zone_configs
+        self.labels = {}
+        for i, zone in enumerate(zone_configs):
+            lbl = tk.Label(self, text=f"{zone['name'].capitalize()} - Entrance: 0 | Exit: 0 | Zone: 0", font=("Arial", 16))
+            lbl.pack(pady=10)
+            self.labels[zone["name"]] = lbl
+        self.poll_counts()
+
+    def poll_counts(self):
+        for zone in self.zone_configs:
+            entrance, exit, zone_c = read_counts(zone["count_file"])
+            self.labels[zone["name"]].config(
+                text=f"{zone['name'].capitalize()} - Entrance: {entrance} | Exit: {exit} | Zone: {zone_c}"
+            )
+        self.after(1000, self.poll_counts)  # Update every second
+
+def main():
+    # Launch subprocesses for each zone
+    procs = [launch_zone_detector(cfg) for cfg in ZONE_CONFIGS]
+
+    # Launch UI
+    app = ZoneCountApp(ZONE_CONFIGS)
+    app.mainloop()
+
+    # Terminate subprocesses when UI is closed
+    for p in procs:
+        p.terminate()
+
+if __name__ == "__main__":
+    main()
