@@ -6,19 +6,15 @@ import time
 import logging
 import threading
 import queue
+from counters_shared import zone_counters, counter_lock
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-from threading import Lock
-counter_lock = Lock()
-
-# Zone-wise counters for multiple zones (example for zone1 and zone2)
-zone_counters = {
-    "zone1": {"entrance": 0, "exit": 0, "zone_count": 0},
-    "zone2": {"entrance": 0, "exit": 0, "zone_count": 0}
-}
+# Add after imports
+detection_started = False
+display_enabled = False  # set True if you still want OpenCV windows
 
 class CentroidTracker:
     def __init__(self, max_disappeared=30):
@@ -253,8 +249,12 @@ def process_stream(rtsp_url, gstreamer_pipeline, output_dir, video_out_path, zon
     logger.info(f"Processing time: {total_time:.1f} seconds")
     logger.info(f"Average FPS: {frame_count / total_time:.1f}")
 
-if __name__ == "__main__":
-    # Configuration for multiple zones
+def start_detection():
+    global detection_started
+    if detection_started:
+        return
+    detection_started = True
+    logger.info("Starting multi-zone detection threads...")
     zone_configs = {
         "zone1": {
             "entrance": {
@@ -264,54 +264,66 @@ if __name__ == "__main__":
                 "video_out": "output_zone1_entrance.mp4",
             },
             "exit": {
-                "url": "rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101",
-                "gstreamer": "rtspsrc location=rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+                "url": "rtsp://admin:@Deee123@10.40.16.217:554/Streaming/Channels/101",
+                "gstreamer": "rtspsrc location=rtsp://admin:@Deee123@10.40.16.217:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
                 "output_dir": "detected_faces/zone1/exit",
                 "video_out": "output_zone1_exit.mp4",
             }
         },
         "zone2": {
             "entrance": {
-                "url": "rtsp://admin:zone2pass@10.40.16.237:554/Streaming/Channels/101",
-                "gstreamer": "rtspsrc location=rtsp://admin:zone2pass@10.40.16.237:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+                "url": "rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101",
+                "gstreamer": "rtspsrc location=rtsp://admin:@Deee123@10.40.16.196:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
                 "output_dir": "detected_faces/zone2/entrance",
                 "video_out": "output_zone2_entrance.mp4",
             },
             "exit": {
-                "url": "rtsp://admin:zone2exit@10.40.16.198:554/Streaming/Channels/101",
-                "gstreamer": "rtspsrc location=rtsp://admin:zone2exit@10.40.16.198:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
+                "url": "rtsp://admin:DeeeEngex@10.40.16.214:554/Streaming/Channels/101",
+                "gstreamer": "rtspsrc location=rtsp://admin:DeeeEngex@10.40.16.214:554/Streaming/Channels/101 latency=200 ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR ! appsink",
                 "output_dir": "detected_faces/zone2/exit",
                 "video_out": "output_zone2_exit.mp4",
             }
         }
     }
-    # Create output dirs
     for zone, cams in zone_configs.items():
         for cam_type, conf in cams.items():
             os.makedirs(conf['output_dir'], exist_ok=True)
+
     display_queue = queue.Queue()
     threads = []
     for zone, cams in zone_configs.items():
         for cam_type, conf in cams.items():
-            t = threading.Thread(target=process_stream, args=(
-                conf['url'], conf['gstreamer'], conf['output_dir'], conf['video_out'], zone, cam_type, display_queue
-            ))
-            t.daemon = True
+            t = threading.Thread(
+                target=process_stream,
+                args=(conf['url'], conf['gstreamer'], conf['output_dir'], conf['video_out'],
+                      zone, cam_type, display_queue),
+                daemon=True
+            )
             t.start()
             threads.append(t)
-    while True:
-        try:
-            win_name, frame, current_count = display_queue.get(timeout=1)
-            cv2.imshow(win_name, frame)
-            print(f"{win_name}: real-time count: {current_count}")
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-        except queue.Empty:
-            if not any(t.is_alive() for t in threads):
-                break
-    for t in threads:
-        t.join()
-    cv2.destroyAllWindows()
-    # Print final zone-wise counts
-    for zone, counters in zone_counters.items():
-        logger.info(f"Final counts for {zone}: Entrance={counters['entrance']}, Exit={counters['exit']}, ZoneCount={counters['zone_count']}")
+
+    def consumer():
+        while True:
+            try:
+                _, frame, _ = display_queue.get(timeout=5)
+                if display_enabled:
+                    cv2.imshow("Streams", frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+            except queue.Empty:
+                if not any(t.is_alive() for t in threads):
+                    break
+        if display_enabled:
+            cv2.destroyAllWindows()
+        logger.info("Detection threads finished.")
+
+    threading.Thread(target=consumer, daemon=True).start()
+
+if __name__ == "__main__":
+    start_detection()
+    # Keep main thread alive
+    try:
+        while True:
+            time.sleep(2)
+    except KeyboardInterrupt:
+        pass
